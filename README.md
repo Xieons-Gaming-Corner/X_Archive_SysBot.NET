@@ -1,5 +1,6 @@
-@ XGC Source Unaltered Archive
-* This repository if a fork of: [Sysbot[(test) 
+# XGC Source Unaltered Archive
+* This repository if a fork of: [The Vanillia Sysbot Source Code](https://github.com/kwsch/SysBot.NET)
+* * No changes have been made to the code - the only additions are descriptions of the purpose, and explanation of archival projects XGC has dependance on in the event the source file is unaccessable there is redundancies in place .
 
 # SysBot.NET
 ![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)
