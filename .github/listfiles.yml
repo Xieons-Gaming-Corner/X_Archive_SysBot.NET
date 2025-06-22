@@ -1,0 +1,35 @@
+name: List Files with Count and Upload Artifact
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  list-files:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: List All Files with Count
+      run: |
+        $date = (Get-Date -Format "yyyy-MM-dd_HH-mm-ss")
+        $fileList = Get-ChildItem -Recurse | Select-Object FullName
+        $count = 1
+        $fileList | ForEach-Object { 
+          "$count. $($_.FullName)" 
+          $count++
+        } | Out-File "file-list-$date.txt"
+
+    - name: Upload File List as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: file-list
+        path: file-list-*.txt
