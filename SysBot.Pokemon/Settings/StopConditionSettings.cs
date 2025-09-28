@@ -159,14 +159,30 @@ public class StopConditionSettings
         return false;
     }
 
+    public static ReadOnlySpan<BattleTemplateToken> TokenOrder =>
+    [
+        BattleTemplateToken.FirstLine,
+        BattleTemplateToken.Shiny,
+        BattleTemplateToken.Nature,
+        BattleTemplateToken.IVs,
+    ];
+
     public static string GetPrintName(PKM pk)
     {
-        var set = ShowdownParsing.GetShowdownText(pk);
+        const LanguageID lang = LanguageID.English;
+        var settings = new BattleTemplateExportSettings(TokenOrder, lang);
+        var set = ShowdownParsing.GetShowdownText(pk, settings);
+
+        // Since we can match on Min/Max Height for transfer to future games, display it.
+        if (pk is IScaledSize p)
+            set += $"\nHeight: {p.HeightScalar}";
+
+        // Add the mark if it has one.
         if (pk is IRibbonIndex r)
         {
             var rstring = GetMarkName(r);
             if (!string.IsNullOrEmpty(rstring))
-                set += $"\nPokémon found to have **{GetMarkName(r)}**!";
+                set += $"\nPokémon has the **{GetMarkName(r)}**!";
         }
         return set;
     }
@@ -181,7 +197,7 @@ public class StopConditionSettings
         for (var mark = RibbonIndex.MarkLunchtime; mark <= RibbonIndex.MarkSlump; mark++)
         {
             if (pk.GetRibbon((int)mark))
-                return RibbonStrings.GetName($"Ribbon{mark}");
+                return GameInfo.Strings.Ribbons.GetName($"Ribbon{mark}");
         }
         return "";
     }
