@@ -1,13 +1,11 @@
-using PKHeX.Core;
-using SysBot.Base;
-using SysBot.Pokemon.Z3;
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Drawing;
 using System.Linq;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using PKHeX.Core;
+using SysBot.Base;
 
 namespace SysBot.Pokemon.WinForms;
 
@@ -15,32 +13,19 @@ public sealed partial class Main : Form
 {
     private readonly List<PokeBotState> Bots = [];
     private readonly IPokeBotRunner RunningEnvironment;
-    private readonly ProgramConfig Config;
+    private readonly ProgramConfig Config = Program.Config;
 
     public Main()
     {
         InitializeComponent();
 
-        PokeTradeBotSWSH.SeedChecker = new Z3SeedSearchHandler<PK8>();
-        if (File.Exists(Program.ConfigPath))
+        RunningEnvironment = GetRunner(Config);
         {
-            var lines = File.ReadAllText(Program.ConfigPath);
-            Config = JsonSerializer.Deserialize(lines, ProgramConfigContext.Default.ProgramConfig) ?? new ProgramConfig();
-            LogConfig.MaxArchiveFiles = Config.Hub.MaxArchiveFiles;
-            LogConfig.LoggingEnabled = Config.Hub.LoggingEnabled;
-
-            RunningEnvironment = GetRunner(Config);
             foreach (var bot in Config.Bots)
             {
                 bot.Initialize();
                 AddBot(bot);
             }
-        }
-        else
-        {
-            Config = new ProgramConfig();
-            RunningEnvironment = GetRunner(Config);
-            Config.Hub.Folder.CreateDefaults(Program.WorkingDirectory);
         }
 
         RTB_Logs.MaxLength = 32_767; // character length
@@ -48,15 +33,38 @@ public sealed partial class Main : Form
         Text = $"{Text} ({Config.Mode})";
         Task.Run(BotMonitor);
 
-        InitUtil.InitializeStubs(Config.Mode);
+        var trainer = Config.Hub.Legality;
+        InitUtil.InitializeStubs(Config.Mode, trainer.GenerateOT, trainer.GenerateLanguage);
+
+        if (Application.IsDarkModeEnabled)
+        {
+            foreach (var control in this.GetChildrenOfType<Control>())
+                WinFormsUtil.ReformatDark(control);
+        }
+
+        if (Config is not { Width: 0, Height: 0 })
+        {
+            Width = Config.Width;
+            Height = Config.Height;
+        }
+
+        B_New.Height = CB_Protocol.Height;
+        FLP_BotCreator.Height = B_New.Height + B_New.Margin.Vertical;
     }
 
-    private static IPokeBotRunner GetRunner(ProgramConfig cfg) => cfg.Mode switch
+    protected override void ScaleControl(SizeF factor, BoundsSpecified specified)
     {
-        ProgramMode.SWSH => new PokeBotRunnerImpl<PK8>(cfg.Hub, new BotFactory8SWSH()),
-        ProgramMode.BDSP => new PokeBotRunnerImpl<PB8>(cfg.Hub, new BotFactory8BS()),
-        ProgramMode.LA => new PokeBotRunnerImpl<PA8>(cfg.Hub, new BotFactory8LA()),
-        ProgramMode.SV => new PokeBotRunnerImpl<PK9>(cfg.Hub, new BotFactory9SV()),
+        base.ScaleControl(factor, specified);
+        TC_Main.ItemSize = new((int)(TC_Main.ItemSize.Width * factor.Width), (int)(TC_Main.ItemSize.Height * factor.Height));
+    }
+
+    private IPokeBotRunner GetRunner(ProgramConfig cfg) => cfg.Mode switch
+    {
+        ProgramMode.SWSH => new PokeBotRunnerImpl<PK8>(cfg.Hub, new BotFactory8SWSH()) { Owner = this },
+        ProgramMode.BDSP => new PokeBotRunnerImpl<PB8>(cfg.Hub, new BotFactory8BS()) { Owner = this },
+        ProgramMode.LA   => new PokeBotRunnerImpl<PA8>(cfg.Hub, new BotFactory8LA()) { Owner = this },
+        ProgramMode.SV   => new PokeBotRunnerImpl<PK9>(cfg.Hub, new BotFactory9SV()) { Owner = this },
+        ProgramMode.LZA  => new PokeBotRunnerImpl<PA9>(cfg.Hub, new BotFactory9LZA()) { Owner = this },
         _ => throw new IndexOutOfRangeException("Unsupported mode."),
     };
 
@@ -81,7 +89,6 @@ public sealed partial class Main : Form
 
     private void LoadControls()
     {
-        MinimumSize = Size;
         PG_Hub.SelectedObject = RunningEnvironment.Config;
 
         var routines = Enum.GetValues<PokeRoutineType>().Where(z => RunningEnvironment.SupportsRoutine(z));
@@ -130,21 +137,22 @@ public sealed partial class Main : Form
     private void SaveCurrentConfig()
     {
         var cfg = GetCurrentConfiguration();
-        var lines = JsonSerializer.Serialize(cfg, ProgramConfigContext.Default.ProgramConfig);
-        File.WriteAllText(Program.ConfigPath, lines);
+        cfg.Width = Width;
+        cfg.Height = Height;
+        ConfigLoader.Save(cfg);
     }
 
     private void B_Start_Click(object sender, EventArgs e)
     {
         SaveCurrentConfig();
 
-        LogUtil.LogInfo("Starting all bots...", "Form");
+        LogUtil.LogInfo("Starting all bots...");
         RunningEnvironment.InitializeStart();
         SendAll(BotControlCommand.Start);
         Tab_Logs.Select();
 
         if (Bots.Count == 0)
-            WinFormsUtil.Alert("No bots configured, but all supporting services have been started.");
+            this.Alert("No bots configured, but all supporting services have been started.");
     }
 
     private void SendAll(BotControlCommand cmd)
@@ -160,7 +168,7 @@ public sealed partial class Main : Form
         var env = RunningEnvironment;
         if (!env.IsRunning && (ModifierKeys & Keys.Alt) == 0)
         {
-            WinFormsUtil.Alert("Nothing is currently running.");
+            this.Alert("Nothing is currently running.");
             return;
         }
 
@@ -170,12 +178,12 @@ public sealed partial class Main : Form
         {
             if (env.IsRunning)
             {
-                WinFormsUtil.Alert("Commanding all bots to Idle.", "Press Stop (without a modifier key) to hard-stop and unlock control, or press Stop with the modifier key again to resume.");
+                this.Alert("Commanding all bots to Idle.", "Press Stop (without a modifier key) to hard-stop and unlock control, or press Stop with the modifier key again to resume.");
                 cmd = BotControlCommand.Idle;
             }
             else
             {
-                WinFormsUtil.Alert("Commanding all bots to resume their original task.", "Press Stop (without a modifier key) to hard-stop and unlock control.");
+                this.Alert("Commanding all bots to resume their original task.", "Press Stop (without a modifier key) to hard-stop and unlock control.");
                 cmd = BotControlCommand.Resume;
             }
         }
@@ -187,7 +195,7 @@ public sealed partial class Main : Form
         var cfg = CreateNewBotConfig();
         if (!AddBot(cfg))
         {
-            WinFormsUtil.Alert("Unable to add bot; ensure details are valid and not duplicate with an already existing bot.");
+            this.Alert("Unable to add bot; ensure details are valid and not duplicate with an already existing bot.");
             return;
         }
         System.Media.SystemSounds.Asterisk.Play();
@@ -218,7 +226,7 @@ public sealed partial class Main : Form
         }
         catch (ArgumentException ex)
         {
-            WinFormsUtil.Error(ex.Message);
+            this.Error(ex.Message);
             return false;
         }
 
@@ -229,18 +237,18 @@ public sealed partial class Main : Form
 
     private void AddBotControl(PokeBotState cfg)
     {
-        var row = new BotController { Width = FLP_Bots.Width };
+        var row = new BotController { Width = FLP_Bots.Width, Anchor = AnchorStyles.Left | AnchorStyles.Right };
         row.Initialize(RunningEnvironment, cfg);
         FLP_Bots.Controls.Add(row);
         FLP_Bots.SetFlowBreak(row, true);
-        row.Click += (s, e) =>
+        row.AddClickHandler(() =>
         {
             var details = cfg.Connection;
             TB_IP.Text = details.IP;
             NUD_Port.Text = details.Port.ToString();
             CB_Protocol.SelectedIndex = (int)details.Protocol;
             CB_Routine.SelectedValue = (int)cfg.InitialRoutine;
-        };
+        });
 
         row.Remove += (s, e) =>
         {

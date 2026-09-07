@@ -1,26 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace SysBot.Pokemon;
 
-public class SeedSearchResult(Z3SearchResult Type, ulong Seed, int FlawlessIVCount, SeedCheckResults Mode)
+public sealed record SeedSearchResult(Z3SearchResult Type, ulong Seed, int FlawlessIVCount, SeedCheckResults Mode)
 {
-    public static readonly SeedSearchResult None = new(Z3SearchResult.SeedNone, default, 0, SeedCheckResults.ClosestOnly);
+    public static readonly SeedSearchResult None = new(Z3SearchResult.SeedNone, 0, 0, SeedCheckResults.ClosestOnly);
 
-    public readonly Z3SearchResult Type = Type;
-    public readonly ulong Seed = Seed;
-    public readonly int FlawlessIVCount = FlawlessIVCount;
-    public readonly SeedCheckResults Mode = Mode;
-
-    public override string ToString()
+    public override string ToString() => Type switch
     {
-        return Type switch
-        {
-            Z3SearchResult.SeedMismatch => $"Seed found, but not an exact match {Seed:X16}",
-            Z3SearchResult.Success => string.Join(Environment.NewLine, GetLines()),
-            _ => "The Pokémon is not a raid Pokémon!",
-        };
-    }
+        Z3SearchResult.SeedMismatch => $"Seed found, but not an exact match {Seed:X16}",
+        Z3SearchResult.Success => string.Join(Environment.NewLine, GetLines()),
+        _ => "The Pokémon is not a raid Pokémon!",
+    };
 
     private IEnumerable<string> GetLines()
     {
@@ -28,7 +20,7 @@ public class SeedSearchResult(Z3SearchResult Type, ulong Seed, int FlawlessIVCou
             yield return $"IVCount: {FlawlessIVCount}";
         yield return "Spreads are listed by flawless IV count.";
 
-        SeedSearchUtil.GetShinyFrames(Seed, out int[] frames, out uint[] type, out List<uint[,]> IVs, Mode);
+        SeedSearchUtil.GetShinyFrames(Seed, out var frames, out var type, out var ivs, Mode);
 
         for (int i = 0; i < 3 && frames[i] != 0; i++)
         {
@@ -40,7 +32,7 @@ public class SeedSearchResult(Z3SearchResult Type, ulong Seed, int FlawlessIVCou
                 var ivlist = $"{ivcount + 1} - ";
                 for (int j = 0; j < 6; j++)
                 {
-                    ivlist += IVs[i][ivcount, j];
+                    ivlist += ivs[i][ivcount, j];
                     if (j < 5)
                         ivlist += "/";
                 }

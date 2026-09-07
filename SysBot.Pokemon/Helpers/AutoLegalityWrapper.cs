@@ -1,9 +1,9 @@
-using PKHeX.Core;
-using PKHeX.Core.AutoMod;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using PKHeX.Core;
+using PKHeX.Core.AutoMod;
 
 namespace SysBot.Pokemon;
 
@@ -55,7 +55,7 @@ public static class AutoLegalityWrapper
         // We need all the encounter types present, so add the missing ones at the end.
         var missing = EncounterPriority.Except(cfg.PrioritizeEncounters);
         cfg.PrioritizeEncounters.AddRange(missing);
-        cfg.PrioritizeEncounters = cfg.PrioritizeEncounters.Distinct().ToList(); // Don't allow duplicates.
+        cfg.PrioritizeEncounters = [.. cfg.PrioritizeEncounters.Distinct()]; // Don't allow duplicates.
         EncounterMovesetGenerator.PriorityList = cfg.PrioritizeEncounters;
     }
 
@@ -81,11 +81,13 @@ public static class AutoLegalityWrapper
 
         // Seed the Trainer Database with enough fake save files so that we return a generation sensitive format when needed.
         var fallback = GetDefaultTrainer(cfg);
-        for (byte generation = 1; generation <= Latest.Generation; generation++)
+        for (var context = EntityContext.Gen1; context < EntityContext.MaxInvalid; context++)
         {
-            var versions = GameUtil.GetVersionsInGeneration(generation, Latest.Version);
+            if (context == EntityContext.SplitInvalid)
+                continue;
+            var versions = GameUtil.GetVersionsInGeneration(context, Latest.Version);
             foreach (var version in versions)
-                RegisterIfNoneExist(fallback, generation, version);
+                RegisterIfNoneExist(fallback, context.Generation, version);
         }
     }
 
@@ -115,14 +117,14 @@ public static class AutoLegalityWrapper
             OT = fallback.OT,
             Generation = generation,
         };
-        var exist = TrainerSettings.GetSavedTrainerData(generation, version, fallback);
+        var exist = TrainerSettings.GetSavedTrainerData((EntityContext)generation, version, fallback);
         if (exist is SimpleTrainerInfo) // not anything from files; this assumes ALM returns SimpleTrainerInfo for non-user-provided fake templates.
             TrainerSettings.Register(fallback);
     }
 
-    public static bool CanBeTraded(this PKM pk)
+    public static bool CanBeTraded(this PKM pk, IEncounterTemplate enc)
     {
-        if (pk.IsNicknamed)
+        if (pk.IsNicknamed && enc is not IFixedNickname {IsFixedNickname: true})
         {
             Span<char> nick = stackalloc char[pk.TrashCharCountNickname];
             int len = pk.LoadString(pk.NicknameTrash, nick);
@@ -134,23 +136,27 @@ public static class AutoLegalityWrapper
             Span<char> ot = stackalloc char[pk.TrashCharCountTrainer];
             int len = pk.LoadString(pk.OriginalTrainerTrash, ot);
             ot = ot[..len];
-            if (StringsUtil.IsSpammyString(ot) && !IsFixedOT(new LegalityAnalysis(pk).EncounterOriginal, pk))
+            if (StringsUtil.IsSpammyString(ot) && !IsFixedOT(enc, pk))
                 return false;
         }
-        return !FormInfo.IsFusedForm(pk.Species, pk.Form, pk.Format);
+        if (TradeRestrictions.IsUntradableHeld(pk.Context, pk.HeldItem))
+            return false;
+        return !TradeRestrictions.IsUntradable(pk.Species, pk.Form, pk is IFormArgument f ? f.FormArgument : 0, pk.Format);
     }
 
     public static bool IsFixedOT(IEncounterTemplate t, PKM pkm) => t switch
     {
         IFixedTrainer { IsFixedTrainer: true } => true,
+        EncounterGift9a { Trainer: not 0 } => true, // todo ZA DLC: remove me, implicitly covered by IFixedTrainer
         MysteryGift g => !g.IsEgg && g switch
         {
+            WA9 wa9 => wa9.GetHasOT(pkm.Language),
             WC9 wc9 => wc9.GetHasOT(pkm.Language),
             WA8 wa8 => wa8.GetHasOT(pkm.Language),
             WB8 wb8 => wb8.GetHasOT(pkm.Language),
             WC8 wc8 => wc8.GetHasOT(pkm.Language),
             WB7 wb7 => wb7.GetHasOT(pkm.Language),
-            { Generation: >= 5 } gift => gift.OriginalTrainerName.Length > 0,
+            { Generation: >= 5 } => g.OriginalTrainerName.Length > 0,
             _ => true,
         },
         _ => false,
@@ -166,11 +172,14 @@ public static class AutoLegalityWrapper
             return TrainerSettings.GetSavedTrainerData(GameVersion.PLA);
         if (typeof(T) == typeof(PK9))
             return TrainerSettings.GetSavedTrainerData(GameVersion.SV);
+        if (typeof(T) == typeof(PA9))
+            return TrainerSettings.GetSavedTrainerData(GameVersion.ZA);
 
         throw new ArgumentException("Type does not have a recognized trainer fetch.", typeof(T).Name);
     }
 
-    public static ITrainerInfo GetTrainerInfo(byte gen) => TrainerSettings.GetSavedTrainerData(gen);
+    public static ITrainerInfo GetTrainerInfo(GameVersion version) => TrainerSettings.GetSavedTrainerData(version);
+    public static ITrainerInfo GetTrainerInfo(EntityContext context) => TrainerSettings.GetSavedTrainerData(context);
 
     public static PKM GetLegal(this ITrainerInfo sav, IBattleTemplate set, out string res)
     {
